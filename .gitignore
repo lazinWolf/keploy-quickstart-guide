@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Next.js output and generated types
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Local deployment settings and secrets
+.vercel/
+.env*
+!.env.example
+/.aws/
+
+# Logs, editor files, and OS metadata
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local assistant instructions and review artifacts
+/AGENTS.md
+/CLAUDE.md
+/.codex/
+/.agents/
+/.claude/
+.preview/

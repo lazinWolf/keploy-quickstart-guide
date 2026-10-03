@@ -1,0 +1,361 @@
+import {
+  GuideLayout,
+  GuideHero,
+  Journey,
+  Prerequisites,
+  FieldNote,
+  ExtraExercises,
+  OriginalReference,
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/guide";
+
+<GuideLayout>
+
+<GuideHero />
+
+<div className="article-intro">
+
+I tried Keploy with a small Go URL shortener built with Echo and PostgreSQL. Keploy records the API requests, responses, and database calls, then replays the requests using recorded database responses as mocks. For a Go developer, that means repeatable tests to catch changes in API behavior, without writing the database mocks by hand.
+
+I followed [the official quickstart](https://keploy.io/docs/quickstart/samples-echo/#running-app-locally-on-linuxwsl-) on Linux. Here’s the same flow, with notes from my run and a few tips for following along. The Go app runs on your machine; PostgreSQL runs in Docker.
+
+</div>
+
+<Journey />
+
+<Prerequisites>
+
+You'll need Linux or WSL2 with **Go**, **Docker Compose**, and **Keploy**, plus Git to clone the sample. If you use Docker Desktop with WSL2, enable integration for your Linux distribution.
+
+If you need to install something, the [commands and links are at the end](#need-to-install-a-tool). Otherwise, let's get the app.
+
+</Prerequisites>
+
+## 1. Get the URL shortener
+
+In **Terminal 1**, clone the [sample repository](https://github.com/keploy/samples-go), open its Echo + PostgreSQL example, and download the Go dependencies:
+
+```bash
+git clone https://github.com/keploy/samples-go.git
+cd samples-go/echo-sql
+go mod download
+```
+
+Run the project commands from `samples-go/echo-sql`. Navigate there again in each new terminal.
+
+<Accordion type="single" collapsible className="optional-block">
+<AccordionItem value="old-recordings">
+<AccordionTrigger>Does your checkout already have Keploy recordings?</AccordionTrigger>
+<AccordionContent>
+
+<FieldNote label="Before recording">
+
+The sample may already contain a `keploy/` folder with recordings that your CLI version can't read. I recommend setting those aside so you can start with your own:
+
+</FieldNote>
+
+```bash
+mv keploy keploy-backup
+```
+
+Skip this if the folder doesn't exist, and use an unused backup name. This keeps the originals while making room for fresh recordings.
+
+If you're happy to discard the bundled data, use `rm -r -- ./keploy/` instead, from `samples-go/echo-sql`. This deletes its tests and mocks; do it before creating your own recordings. Add `sudo` only if the file permissions require it.
+
+</AccordionContent>
+</AccordionItem>
+</Accordion>
+
+## 2. Start PostgreSQL and connect the app
+
+In **Terminal 1**, start just the database service:
+
+```bash
+docker compose up postgres
+```
+
+Add `sudo` if your Docker Engine setup requires it. Leave this terminal open and wait for PostgreSQL's logs to say it's ready to accept connections.
+
+> **A space made the difference:** the [original Linux/WSL instructions](https://keploy.io/docs/quickstart/samples-echo/#running-app-locally-on-linuxwsl-) use `docker-compose`, the older standalone command. My installation uses the Docker CLI plugin, so I needed `docker compose`. If neither works, install the Compose plugin. [Why the syntax changed](https://docs.docker.com/compose/intro/history/).
+
+Open `main.go`, find the PostgreSQL connection settings, and set the host to `localhost`. Keep the other settings as they are. Since the Go app runs on your machine, it reaches PostgreSQL through Docker's published database port.
+
+> **Line 41 or line 47?** The [guide points to line 41](https://keploy.io/docs/quickstart/samples-echo/#running-app-locally-on-linuxwsl-), but the host setting was on line 47 in my copy. Line numbers shift as files change, and blank lines count too. If your file looks different, search for the database host setting. The setting matters more than its line number.
+
+<Accordion type="single" collapsible className="optional-block">
+<AccordionItem value="detached">
+<AccordionTrigger>Prefer to keep PostgreSQL in the background?</AccordionTrigger>
+<AccordionContent>
+
+You can use `-d` for detached mode when starting the database, freeing up the terminal:
+
+```bash
+docker compose up -d postgres
+docker compose logs --tail 20 postgres
+```
+
+The container stays running after the command returns. Check the logs for database readiness; rerun the logs command if startup is still in progress. [About detached mode](https://docs.docker.com/reference/cli/docker/compose/up/) · [Viewing logs](https://docs.docker.com/reference/cli/docker/compose/logs/).
+
+</AccordionContent>
+</AccordionItem>
+</Accordion>
+
+## 3. Build the Go app
+
+Open **Terminal 2**, navigate to `samples-go/echo-sql`, and build:
+
+```bash
+go build -o echo-psql-url-shortener
+```
+
+A successful build usually returns to the prompt without printing anything. You'll now have an executable named `echo-psql-url-shortener`, ready for Keploy to start.
+
+One habit worth keeping: rebuild after editing the Go source, including the database settings. Otherwise, you'll still be running the old executable.
+
+Curious about that command? [Go explains building an executable here](https://go.dev/doc/tutorial/compile-install).
+
+## 4. Start recording
+
+If you haven't signed in to Keploy yet, run `keploy login` and follow the browser prompt.
+
+In **Terminal 2**, let Keploy start the app so it can capture incoming API requests and the app's PostgreSQL calls:
+
+```bash
+sudo -E PATH="$PATH" keploy record -c "./echo-psql-url-shortener"
+```
+
+Here, `-c` tells Keploy how to start the app. The `sudo -E PATH="$PATH"` prefix follows the quickstart's Linux setup: it provides elevated permissions while preserving your environment and command search path.
+
+Wait for the app to start listening on port `8082`, then leave this terminal running. Recording is ready, but we haven't exercised the app yet. Let's give Keploy something to capture.
+
+## 5. Create a link, then open it
+
+Open **Terminal 3**. I used curl, but Postman works too. Either way, keep Keploy recording while you make both requests.
+
+First, create a shortened URL:
+
+```bash
+curl --request POST \
+  --url http://localhost:8082/url \
+  --header 'Content-Type: application/json' \
+  --data '{"url":"https://google.com"}'
+```
+
+You should receive JSON containing a timestamp and a shortened URL. For example:
+
+```json
+{ "ts": 1790863305523321558, "url": "http://localhost:8082/Lhr4BWAi" }
+```
+
+Copy the `url` returned by your own request. The timestamp and short code may differ from this example.
+
+If you get an error instead, resolve it before continuing. Keploy records the response it sees; repeating an error later wouldn't establish that link creation works.
+
+Next, request that shortened URL. Replace the example below with yours:
+
+```bash
+curl -i http://localhost:8082/Lhr4BWAi
+```
+
+Look for a redirect status and a `Location` header pointing to the original URL. The `-i` option includes response headers, making the redirect visible.
+
+> **The quiet response:** plain `curl` printed nothing in my run. That can happen with an empty redirect response, and curl doesn't follow redirects by default. I've added `-i` here so you can see the headers and check what happened.
+
+We've now exercised both behaviors: creating a link and looking it up to redirect.
+
+References: [Curl response headers](https://curl.se/docs/manpage.html#-i) · [How curl handles redirects](https://curl.se/docs/faq.html).
+
+## 6. Stop recording and replay
+
+Return to **Terminal 2** and press **Ctrl+C** to stop recording. Wait for Keploy to finish shutting down before starting replay.
+
+Before replaying, take a quick look inside `keploy/`. Open a generated test and find its request method, path, and recorded response. You should recognize the call you just made. The accompanying mocks contain the recorded database interactions; the exact file layout depends on your CLI version.
+
+Then run:
+
+```bash
+sudo -E PATH="$PATH" keploy test -c "./echo-psql-url-shortener"
+```
+
+Keploy starts the app again, sends the recorded requests, and compares the responses. When the app talks to PostgreSQL, Keploy supplies the recorded database responses as mocks. [How recording and replay work](https://keploy.io/docs/keploy-explained/introduction/).
+
+Look for your newly recorded cases in the summary and check their results. If one fails, open its report and inspect the differences before changing anything.
+
+A passing replay checks this recorded flow. Other paths through the app still need their own tests.
+
+## If something gets in the way
+
+<Accordion type="multiple" className="help-accordion">
+<AccordionItem value="trouble-1">
+<AccordionTrigger>Permission denied when connecting to Docker</AccordionTrigger>
+<AccordionContent>
+
+For a native Docker Engine installation, use `sudo` for the Docker commands. Docker also documents optional user-group configuration; follow that guide if you want to run Docker without `sudo`.
+
+Reference: [Docker post-installation steps](https://docs.docker.com/engine/install/linux-postinstall/).
+
+</AccordionContent>
+</AccordionItem>
+<AccordionItem value="trouble-3">
+<AccordionTrigger>The app can't connect to PostgreSQL</AccordionTrigger>
+<AccordionContent>
+
+Check Terminal 1 for database readiness and confirm that the database host in `main.go` is `localhost`. From the sample directory, inspect the container status and published ports:
+
+```bash
+docker compose ps --all postgres
+```
+
+The `--all` option also shows a container that exited. Compare the published host port with the app's connection settings, then rebuild if you edit `main.go`. A running container still needs to finish database startup; check its logs too. [Reading Compose container status](https://docs.docker.com/reference/cli/docker/compose/ps/).
+
+</AccordionContent>
+</AccordionItem>
+<AccordionItem value="trouble-5">
+<AccordionTrigger>Existing recordings cause errors</AccordionTrigger>
+<AccordionContent>
+
+If the error points to old sample recordings, follow the cleanup advice in [step 1](#1-get-the-url-shortener), then record and replay a fresh set. Back up your own recordings first. For other failures, start with the replay report so you can address the actual difference.
+
+</AccordionContent>
+</AccordionItem>
+</Accordion>
+
+## A couple of things to try next
+
+<ExtraExercises>
+
+Once your first replay passes, you can explore what it checks. Make a small change to an API response, rebuild, and replay the same tests. Look at how Keploy reports the difference, then restore the change.
+
+You can also explore the database mocks. After a successful replay, stop PostgreSQL: press **Ctrl+C** in Terminal 1, or use this command from the sample directory if you chose detached mode:
+
+```bash
+docker compose stop postgres
+```
+
+Then replay again. This checks whether your recording has the mocks needed to run without the live database, as the [quickstart describes](https://keploy.io/docs/quickstart/samples-echo/#running-app-locally-on-linuxwsl-).
+
+Both exercises are optional. To record more requests, start PostgreSQL again with `docker compose up -d postgres` and wait for readiness. When you're finished, leave the container stopped and keep your recordings for another day. [About stopping Compose services](https://docs.docker.com/reference/cli/docker/compose/stop/).
+
+</ExtraExercises>
+
+## Need to install a tool?
+
+Open the instructions for the tool you're missing, then return to [step 1](#1-get-the-url-shortener).
+
+<Accordion type="multiple" className="help-accordion">
+<AccordionItem value="go">
+<AccordionTrigger>Install Go</AccordionTrigger>
+<AccordionContent>
+
+Go builds the sample application into an executable. For a fresh Linux x86-64 installation, download an official release and extract it:
+
+```bash
+curl -fLO https://go.dev/dl/go1.27.1.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.27.1.linux-amd64.tar.gz
+export PATH=/usr/local/go/bin:$PATH
+go version
+```
+
+The commands use Go 1.27.1 from the official download page. You can choose another supported release there; use its filename in both commands. If your machine is ARM64, choose the `linux-arm64` archive instead and change both filenames. If Go is already installed, check `go version` first; don't extract an archive over an existing `/usr/local/go` directory.
+
+To keep Go available in future Bash login sessions, add the same `export PATH=/usr/local/go/bin:$PATH` line to `~/.profile`, then open a new login session. Other shells may use a different startup file.
+
+References: [Go downloads](https://go.dev/dl/) · [Official installation instructions](https://go.dev/doc/install) · [Get started with Go](https://go.dev/doc/tutorial/getting-started).
+
+</AccordionContent>
+</AccordionItem>
+<AccordionItem value="docker">
+<AccordionTrigger>Install Docker and Compose</AccordionTrigger>
+<AccordionContent>
+
+Docker will run PostgreSQL so you don't need to install a database server directly on your machine. Choose the instructions for your environment below. These commands are for a fresh Docker Engine installation; for an existing installation, follow the linked guide's upgrade or conflict-resolution steps.
+
+<Tabs defaultValue="ubuntu" className="install-tabs">
+<TabsList aria-label="Choose your Docker environment">
+<TabsTrigger value="ubuntu">Ubuntu</TabsTrigger>
+<TabsTrigger value="fedora">Fedora</TabsTrigger>
+<TabsTrigger value="wsl">WSL2</TabsTrigger>
+</TabsList>
+<TabsContent value="ubuntu">
+
+For a fresh Ubuntu setup, make sure curl and certificate support are available, then set up Docker's package repository:
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl start docker
+sudo docker run hello-world
+```
+
+Reference: [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/).
+
+</TabsContent>
+<TabsContent value="fedora">
+
+```bash
+sudo dnf config-manager addrepo --from-repofile https://download.docker.com/linux/fedora/docker-ce.repo
+sudo dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl start docker
+sudo docker run hello-world
+```
+
+If `dnf config-manager` isn't available, install the plugin appropriate to your Fedora release before continuing with Docker's guide.
+
+Reference: [Install Docker Engine on Fedora](https://docs.docker.com/engine/install/fedora/).
+
+</TabsContent>
+<TabsContent value="wsl">
+
+Install and start Docker Desktop on Windows, enable its WSL2 backend, and enable integration for the Linux distribution you're using. Then check `docker compose version` inside that distribution. When using this route, Docker Desktop manages the engine; skip the native Docker Engine installation blocks above.
+
+Reference: [Get started with containers on WSL](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-containers).
+
+</TabsContent>
+</Tabs>
+</AccordionContent>
+</AccordionItem>
+<AccordionItem value="keploy">
+<AccordionTrigger>Install Keploy</AccordionTrigger>
+<AccordionContent>
+
+Install the CLI using Keploy's official installer, then sign in:
+
+```bash
+curl -fSL https://keploy.io/install.sh -o install-keploy.sh
+source ./install-keploy.sh
+keploy login
+```
+
+Follow the browser sign-in prompt. For terminals without a browser, see the manual-login option in the installation guide.
+
+Reference: [Install and sign in to Keploy](https://keploy.io/docs/server/installation/).
+
+</AccordionContent>
+</AccordionItem>
+</Accordion>
+
+<OriginalReference />
+
+</GuideLayout>
